@@ -12,13 +12,13 @@
 #define IDC_BROWSE     1003
 #define IDC_FLASH      1004
 #define IDC_STATUS     1005
+#define IDC_LOGO       1006
 
 static HWND g_hPortCombo = NULL;
 static HWND g_hHexEdit = NULL;
 static HWND g_hStatus = NULL;
 static HWND g_hLogoStatic = NULL;
 static HBITMAP g_logoBitmap = NULL;
-static HBRUSH g_bgBrush = NULL;
 
 static void SetStatusText(const char *text)
 {
@@ -241,67 +241,107 @@ static void FlashSelectedHex(HWND hwnd)
     MessageBoxA(hwnd, capture, "avrdude output", MB_OK | MB_ICONINFORMATION);
 }
 
+static HBITMAP LoadPNGFromFile(const char *filepath)
+{
+    HBITMAP hBitmap = NULL;
+    WCHAR wFilepath[MAX_PATH];
+    int len;
+
+    if (!filepath || filepath[0] == '\0')
+        return NULL;
+
+    len = MultiByteToWideChar(CP_ACP, 0, filepath, -1, wFilepath, MAX_PATH);
+    if (len == 0)
+        return NULL;
+
+    hBitmap = (HBITMAP)LoadImageW(NULL, wFilepath, IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION);
+
+    return hBitmap;
+}
+
+static void LoadLogoImage(HWND hwnd, HINSTANCE hInstance)
+{
+    char exeDir[MAX_PATH];
+    char logoPath[MAX_PATH];
+    HBITMAP hBitmap;
+
+    GetModuleFileNameA(NULL, exeDir, sizeof(exeDir));
+    char *slash = strrchr(exeDir, '\\');
+    if (slash)
+        *slash = '\0';
+
+    snprintf(logoPath, sizeof(logoPath), "%s\\Logo7.png", exeDir);
+
+    hBitmap = LoadPNGFromFile(logoPath);
+
+    if (hBitmap)
+    {
+        g_logoBitmap = hBitmap;
+        SendMessageA(g_hLogoStatic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBitmap);
+    }
+}
+
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
     {
         case WM_CREATE:
         {
-            HFONT hFont = CreateFontA(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            HFONT hFont = CreateFontA(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                       DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                       DEFAULT_QUALITY, DEFAULT_PITCH, "Arial");
 
             g_hLogoStatic = CreateWindowExA(
-                0, "STATIC", "AVR Flasher",
-                WS_CHILD | WS_VISIBLE | SS_CENTER,
-                20, 10, 600, 100,
-                hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
-            SendMessageA(g_hLogoStatic, WM_SETFONT, (WPARAM)hFont, TRUE);
+                0, "STATIC", "",
+                WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_CENTERIMAGE,
+                20, 10, 560, 90,
+                hwnd, (HMENU)IDC_LOGO, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             CreateWindowExA(
                 0, "STATIC", "COM Port:",
                 WS_CHILD | WS_VISIBLE,
-                30, 140, 80, 20,
+                30, 120, 80, 20,
                 hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             g_hPortCombo = CreateWindowExA(
                 0, "COMBOBOX", "",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
-                120, 135, 200, 120,
+                120, 115, 200, 120,
                 hwnd, (HMENU)IDC_PORT_COMBO, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             CreateWindowExA(
                 0, "STATIC", "HEX File:",
                 WS_CHILD | WS_VISIBLE,
-                30, 175, 80, 20,
+                30, 155, 80, 20,
                 hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             g_hHexEdit = CreateWindowExA(
                 0, "EDIT", "",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER,
-                120, 170, 200, 22,
+                120, 150, 200, 22,
                 hwnd, (HMENU)IDC_HEX_EDIT, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             CreateWindowExA(
                 0, "BUTTON", "Browse...",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                330, 170, 90, 22,
+                330, 150, 90, 22,
                 hwnd, (HMENU)IDC_BROWSE, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             CreateWindowExA(
                 0, "BUTTON", "FLASH",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                120, 210, 120, 40,
+                120, 190, 120, 40,
                 hwnd, (HMENU)IDC_FLASH, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             g_hStatus = CreateWindowExA(
                 0, "STATIC", "Ready",
                 WS_CHILD | WS_VISIBLE | SS_LEFT | WS_BORDER,
-                20, 270, 400, 40,
+                20, 250, 560, 60,
                 hwnd, (HMENU)IDC_STATUS, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
             SendMessageA(g_hStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
 
             PopulateSerialPorts(g_hPortCombo);
+            LoadLogoImage(hwnd, ((LPCREATESTRUCTA)lParam)->hInstance);
 
             return 0;
         }
@@ -335,11 +375,6 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             return 0;
 
         case WM_DESTROY:
-            if (g_bgBrush)
-            {
-                DeleteObject(g_bgBrush);
-                g_bgBrush = NULL;
-            }
             if (g_logoBitmap)
             {
                 DeleteObject(g_logoBitmap);
@@ -379,7 +414,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         "AVRFlashWindowClass",
         "AVR Flash Utility",
         WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME,
-        CW_USEDEFAULT, CW_USEDEFAULT, 600, 400,
+        CW_USEDEFAULT, CW_USEDEFAULT, 600, 350,
         NULL, NULL, hInstance, NULL);
 
     if (!hwnd)
