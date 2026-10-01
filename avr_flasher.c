@@ -7,12 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#pragma comment(lib, "comctl32.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "gdi32.lib")
-#pragma comment(lib, "comdlg32.lib")
-#pragma comment(lib, "advapi32.lib")
-
 #define IDC_PORT_COMBO 1001
 #define IDC_HEX_EDIT   1002
 #define IDC_BROWSE     1003
@@ -328,7 +322,7 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         }
         break;
 
-        case WM_CTLCOLSTSTATIC:
+        case WM_CTLCOLORSTATIC:
         {
             HDC hdc = (HDC)wParam;
             SetBkColor(hdc, RGB(240, 240, 240));
@@ -363,6 +357,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     WNDCLASSA wc = {0};
     HWND hwnd;
     MSG msg;
+
+    (void)hPrevInstance;
+    (void)lpCmdLine;
 
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
