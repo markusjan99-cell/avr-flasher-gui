@@ -1,17 +1,17 @@
 #define UNICODE
 #define _UNICODE
-
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
-#include <objbase.h>
-#include <gdiplus.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #pragma comment(lib, "comctl32.lib")
-#pragma comment(lib, "Gdiplus.lib")
+#pragma comment(lib, "user32.lib")
+#pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "advapi32.lib")
 
 #define IDC_PORT_COMBO 1001
 #define IDC_HEX_EDIT   1002
@@ -19,18 +19,16 @@
 #define IDC_FLASH      1004
 #define IDC_STATUS     1005
 
-using namespace Gdiplus;
-
 static HWND g_hPortCombo = NULL;
 static HWND g_hHexEdit = NULL;
 static HWND g_hStatus = NULL;
+static HWND g_hLogoStatic = NULL;
+static HBITMAP g_logoBitmap = NULL;
 static HBRUSH g_bgBrush = NULL;
-static Gdiplus::Image *g_logoImage = NULL;
-static WCHAR g_logoPath[MAX_PATH] = L"";
 
-static void SetStatusText(HWND hwnd, const char *text)
+static void SetStatusText(const char *text)
 {
-    SetWindowTextA(GetDlgItem(hwnd, IDC_STATUS), text);
+    SetWindowTextA(g_hStatus, text);
 }
 
 static void PopulateSerialPorts(HWND combo)
@@ -60,14 +58,7 @@ static void PopulateSerialPorts(HWND combo)
         valueNameSize = sizeof(valueName);
         dataSize = sizeof(data);
 
-        rc = RegEnumValueA(hKey,
-                           index,
-                           valueName,
-                           &valueNameSize,
-                           NULL,
-                           &type,
-                           (LPBYTE)data,
-                           &dataSize);
+        rc = RegEnumValueA(hKey, index, valueName, &valueNameSize, NULL, &type, (LPBYTE)data, &dataSize);
 
         if (rc == ERROR_NO_MORE_ITEMS)
             break;
@@ -182,7 +173,6 @@ static int RunCommandAndCaptureOutput(const char *cmdLine, char *output, size_t 
     }
 
     CloseHandle(hWritePipe);
-
     WaitForSingleObject(pi.hProcess, INFINITE);
 
     while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0)
@@ -214,14 +204,14 @@ static void FlashSelectedHex(HWND hwnd)
     portIndex = (int)SendMessageA(g_hPortCombo, CB_GETCURSEL, 0, 0);
     if (portIndex == CB_ERR)
     {
-        SetStatusText(hwnd, "No COM port selected.");
+        SetStatusText("No COM port selected.");
         return;
     }
 
     len = (int)SendMessageA(g_hPortCombo, CB_GETLBTEXTLEN, (WPARAM)portIndex, 0);
     if (len <= 0)
     {
-        SetStatusText(hwnd, "Could not read COM port.");
+        SetStatusText("Could not read COM port.");
         return;
     }
 
@@ -230,16 +220,16 @@ static void FlashSelectedHex(HWND hwnd)
     GetWindowTextA(g_hHexEdit, hexFile, sizeof(hexFile));
     if (hexFile[0] == '\0')
     {
-        SetStatusText(hwnd, "Select a .hex file first.");
+        SetStatusText("Select a .hex file first.");
         return;
     }
 
-    SetStatusText(hwnd, "Flashing...");
+    SetStatusText("Flashing...");
     BuildAvrdudeCommand(cmdLine, sizeof(cmdLine), port, hexFile);
 
     if (!RunCommandAndCaptureOutput(cmdLine, capture, sizeof(capture)))
     {
-        SetStatusText(hwnd, "Failed to start avrdude.");
+        SetStatusText("Failed to start avrdude.");
         return;
     }
 
@@ -247,131 +237,14 @@ static void FlashSelectedHex(HWND hwnd)
         strstr(capture, "bytes of flash verified") != NULL ||
         strstr(capture, "Verification successful") != NULL)
     {
-        SetStatusText(hwnd, "Flash complete.");
+        SetStatusText("Flash complete.");
     }
     else
     {
-        SetStatusText(hwnd, "Flash finished, check output.");
+        SetStatusText("Flash finished, check output.");
     }
 
     MessageBoxA(hwnd, capture, "avrdude output", MB_OK | MB_ICONINFORMATION);
-}
-
-static void FindLogoImagePath(void)
-{
-    WCHAR exePath[MAX_PATH];
-    WCHAR dirPath[MAX_PATH];
-    WCHAR candidatePng[MAX_PATH];
-    WCHAR candidateSvg[MAX_PATH];
-
-    GetModuleFileNameW(NULL, exePath, MAX_PATH);
-
-    WCHAR *slash = wcsrchr(exePath, L'\\');
-    if (!slash)
-        return;
-
-    wcsncpy(dirPath, exePath, (size_t)(slash - exePath));
-    dirPath[slash - exePath] = L'\0';
-
-    swprintf(candidatePng, MAX_PATH, L"%s\\Logo7.png", dirPath);
-    swprintf(candidateSvg, MAX_PATH, L"%s\\Logo7.svg", dirPath);
-
-    if (GetFileAttributesW(candidatePng) != INVALID_FILE_ATTRIBUTES)
-    {
-        wcscpy(g_logoPath, candidatePng);
-        return;
-    }
-
-    if (GetFileAttributesW(candidateSvg) != INVALID_FILE_ATTRIBUTES)
-    {
-        wcscpy(g_logoPath, candidateSvg);
-    }
-}
-
-static void LoadLogoImage(void)
-{
-    if (g_logoImage)
-    {
-        delete g_logoImage;
-        g_logoImage = NULL;
-    }
-
-    if (g_logoPath[0] == L'\0')
-    {
-        FindLogoImagePath();
-    }
-
-    if (g_logoPath[0] == L'\0')
-        return;
-
-    try
-    {
-        g_logoImage = Gdiplus::Image::FromFile(g_logoPath, FALSE);
-        if (g_logoImage && g_logoImage->GetLastStatus() != Ok)
-        {
-            delete g_logoImage;
-            g_logoImage = NULL;
-        }
-    }
-    catch (...)
-    {
-        g_logoImage = NULL;
-    }
-}
-
-static void PaintBackground(HWND hwnd, HDC hdc)
-{
-    RECT rc;
-    Graphics graphics(hdc);
-    SolidBrush backgroundBrush(Color(18, 20, 26));
-    SolidBrush accentBrush(Color(35, 90, 140));
-    Pen borderPen(Color(64, 168, 255), 2.0f);
-
-    GetClientRect(hwnd, &rc);
-
-    graphics.FillRectangle(&backgroundBrush, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
-
-    for (int i = 0; i < 8; i++)
-    {
-        int y = rc.top + i * 32;
-        graphics.FillRectangle(&accentBrush, 0, y, rc.right, 2);
-    }
-
-    if (g_logoImage)
-    {
-        int w = g_logoImage->GetWidth();
-        int h = g_logoImage->GetHeight();
-
-        int targetW = min(260, rc.right - 60);
-        float scale = (float)targetW / (float)w;
-        int targetH = (int)(h * scale);
-
-        int x = (rc.right - targetW) / 2;
-        int y = 18;
-
-        if (targetH > 120)
-        {
-            targetH = 120;
-            scale = (float)targetH / (float)h;
-            targetW = (int)(w * scale);
-            x = (rc.right - targetW) / 2;
-        }
-
-        graphics.DrawImage(g_logoImage, x, y, targetW, targetH);
-    }
-    else
-    {
-        FontFamily fontFamily(L"Arial");
-        Font font(&fontFamily, 20, FontStyleBold, UnitPixel);
-        StringFormat format;
-        format.SetAlignment(StringAlignmentCenter);
-
-        SolidBrush textBrush(Color(228, 234, 240));
-        RectF textRect((REAL)0, (REAL)15, (REAL)rc.right, (REAL)80);
-        graphics.DrawString(L"AVR Flasher", -1, &font, textRect, &format, &textBrush);
-    }
-
-    graphics.DrawRectangle(&borderPen, 8, 8, rc.right - 18, rc.bottom - 18);
 }
 
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -380,50 +253,59 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     {
         case WM_CREATE:
         {
-            RECT rc;
-            GetClientRect(hwnd, &rc);
+            HFONT hFont = CreateFontA(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                      DEFAULT_QUALITY, DEFAULT_PITCH, "Arial");
+
+            g_hLogoStatic = CreateWindowExA(
+                0, "STATIC", "AVR Flasher",
+                WS_CHILD | WS_VISIBLE | SS_CENTER,
+                20, 10, 600, 100,
+                hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
+            SendMessageA(g_hLogoStatic, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+            CreateWindowExA(
+                0, "STATIC", "COM Port:",
+                WS_CHILD | WS_VISIBLE,
+                30, 140, 80, 20,
+                hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             g_hPortCombo = CreateWindowExA(
                 0, "COMBOBOX", "",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
-                260, 160, 220, 120,
+                120, 135, 200, 120,
                 hwnd, (HMENU)IDC_PORT_COMBO, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
+
+            CreateWindowExA(
+                0, "STATIC", "HEX File:",
+                WS_CHILD | WS_VISIBLE,
+                30, 175, 80, 20,
+                hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             g_hHexEdit = CreateWindowExA(
                 0, "EDIT", "",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER,
-                260, 220, 220, 24,
+                120, 170, 200, 22,
                 hwnd, (HMENU)IDC_HEX_EDIT, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             CreateWindowExA(
                 0, "BUTTON", "Browse...",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                490, 220, 100, 24,
+                330, 170, 90, 22,
                 hwnd, (HMENU)IDC_BROWSE, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             CreateWindowExA(
                 0, "BUTTON", "FLASH",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                260, 270, 120, 36,
+                120, 210, 120, 40,
                 hwnd, (HMENU)IDC_FLASH, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
-
-            CreateWindowExA(
-                0, "STATIC", "COM Port",
-                WS_CHILD | WS_VISIBLE,
-                170, 165, 80, 20,
-                hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
-
-            CreateWindowExA(
-                0, "STATIC", "HEX File",
-                WS_CHILD | WS_VISIBLE,
-                180, 225, 70, 20,
-                hwnd, NULL, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
 
             g_hStatus = CreateWindowExA(
                 0, "STATIC", "Ready",
-                WS_CHILD | WS_VISIBLE | SS_LEFT,
-                30, 340, 560, 26,
+                WS_CHILD | WS_VISIBLE | SS_LEFT | WS_BORDER,
+                20, 270, 400, 40,
                 hwnd, (HMENU)IDC_STATUS, ((LPCREATESTRUCTA)lParam)->hInstance, NULL);
+            SendMessageA(g_hStatus, WM_SETFONT, (WPARAM)hFont, TRUE);
 
             PopulateSerialPorts(g_hPortCombo);
 
@@ -446,38 +328,34 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         }
         break;
 
-        case WM_PAINT:
+        case WM_CTLCOLSTSTATIC:
         {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
-            PaintBackground(hwnd, hdc);
-            EndPaint(hwnd, &ps);
-            return 0;
+            HDC hdc = (HDC)wParam;
+            SetBkColor(hdc, RGB(240, 240, 240));
+            SetTextColor(hdc, RGB(0, 0, 0));
+            return (LRESULT)GetStockObject(LTGRAY_BRUSH);
         }
-
-        case WM_ERASEBKGND:
-            return 1;
 
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
 
         case WM_DESTROY:
-            if (g_logoImage)
-            {
-                delete g_logoImage;
-                g_logoImage = NULL;
-            }
             if (g_bgBrush)
             {
                 DeleteObject(g_bgBrush);
                 g_bgBrush = NULL;
             }
+            if (g_logoBitmap)
+            {
+                DeleteObject(g_logoBitmap);
+                g_logoBitmap = NULL;
+            }
             PostQuitMessage(0);
             return 0;
     }
 
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
@@ -485,24 +363,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     WNDCLASSA wc = {0};
     HWND hwnd;
     MSG msg;
-    ULONG_PTR gdiplusToken;
-
-    GdiplusStartupInput gdiplusStartupInput;
-    GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
-
-    FindLogoImagePath();
-    LoadLogoImage();
 
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = "AVRFlashWindowClass";
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.style = CS_VREDRAW | CS_HREDRAW;
 
     if (!RegisterClassA(&wc))
     {
         MessageBoxA(NULL, "Failed to register window class.", "Error", MB_ICONERROR);
-        GdiplusShutdown(gdiplusToken);
         return 1;
     }
 
@@ -510,14 +381,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0,
         "AVRFlashWindowClass",
         "AVR Flash Utility",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 650, 420,
+        WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME,
+        CW_USEDEFAULT, CW_USEDEFAULT, 600, 400,
         NULL, NULL, hInstance, NULL);
 
     if (!hwnd)
     {
         MessageBoxA(NULL, "Failed to create window.", "Error", MB_ICONERROR);
-        GdiplusShutdown(gdiplusToken);
         return 1;
     }
 
@@ -530,6 +400,5 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         DispatchMessageA(&msg);
     }
 
-    GdiplusShutdown(gdiplusToken);
     return (int)msg.wParam;
 }
